@@ -11,7 +11,8 @@ from isaacsim.gui.components.element_wrappers import CollapsableFrame, StateButt
 from isaacsim.gui.components.ui_utils import get_style
 from isaacsim.storage.native import get_assets_root_path
 from omni.usd import StageEventType
-from pxr import Sdf, UsdLux
+from pxr import Sdf, UsdLux, UsdPhysics, PhysxSchema, UsdGeom
+from omni.isaac.manipulators.grippers.surface_gripper import SurfaceGripper
 
 from .kr210_scenario import KR210Scenario 
 from .kr210_config import KR210Configuration
@@ -106,20 +107,45 @@ class UIBuilder:
 
     def _setup_scene(self):
         """Called first. References USDs and creates World prims (like cubes)."""
+        self._add_light_to_stage()
+
+        assets_root = get_assets_root_path()
+        robot_usd_path = f"{assets_root}/Isaac/Robots/Kuka/KR210_L150/KR210_L150.usd"
         robot_prim_path = "/World/Default/kuka_kr210"
 
-        create_new_stage()
-        self._add_light_to_stage()
-        add_reference_to_stage(robot_prim_path, robot_prim_path) 
+    # ✅ Add robot reference only if not already in stage
+        if not is_prim_path_valid(robot_prim_path):
+            add_reference_to_stage(robot_usd_path, robot_prim_path)
+            XFormPrim(robot_prim_path).set_world_poses(
+                positions=np.array([[0, 0, 0]]),
+                orientations=np.array([[1, 0, 0, 0]])
+            )
 
+        gripper_path = f"{robot_prim_path}/link_6/SurfaceGripper"
+        if not is_prim_path_valid(gripper_path):
+            print(f"Creating SurfaceGripper at: {gripper_path}")
+            self._gripper = SurfaceGripper(
+                prim_path=gripper_path,
+                parent=robot_prim_path + "/link_6",
+                translation=np.array([0, 0, 0.1]),  # adjust offset if needed
+                grip_threshold=0.01,
+                force_limit=800,
+                torque_limit=800
+            )
+        else:
+            print("SurfaceGripper already exists — skipping.")
+
+    # ✅ Create cubes only if not already present
         cube_paths = self._kr210_scenario.config.pickup_objects
         for i, cube_path in enumerate(cube_paths):
-            FixedCuboid(
-                cube_path,
-                position=np.array([0.5 + i * 0.15, -0.5, 0.05]),
-                size=0.05,
-                color=np.array([255, 0, 0])
-            )
+            if not is_prim_path_valid(cube_path):
+                FixedCuboid(
+                    cube_path,
+                    position=np.array([0.5 + i * 0.15, -0.5, 0.05]),
+                    size=0.05,
+                    color=np.array([255, 0, 0])
+                )
+
 
     def _setup_scenario(self):
         """Called second (post-load). Stage is ready for Articulation/Gripper wrapping."""
